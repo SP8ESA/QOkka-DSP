@@ -76,8 +76,8 @@ Core0 (USB + DSP Producer)            Core1 (Radio Consumer)
 ┌──────────────────────────┐          ┌──────────────────────────┐
 │ USB Audio @ 48kHz        │          │ Timer IRQ @ 8kHz         │
 │   or MIC ADC @ 8kHz      │          │ Read from block buffer   │
-│ Downsample 48k → 8k     │          │ Hilbert transform        │
-│ DSP: BP → EQ → Comp     │ ───────► │ I/Q modulation           │
+│ Downsample 48k → 8k      │          │ Hilbert transform        │
+│ DSP: BP → EQ → Comp      │ ───────► │ I/Q modulation           │
 │ MIC: AGC + noise gate    │          │ SX1280 SPI TX            │
 │ Write to block buffer    │          │                          │
 │ Encoder / button poll    │          │ CW carrier (TUNE mode)   │
