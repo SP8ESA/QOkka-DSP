@@ -1,4 +1,4 @@
-# SX1280 QO-100 SSB TX
+# QOkka DSP
 
 **SSB/CW/FM transmitter for QO-100 satellite (Es'hail 2) and 2.4 GHz band with SX1280 + Raspberry Pi Pico 2**
 
