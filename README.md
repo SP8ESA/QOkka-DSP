@@ -196,9 +196,6 @@ The device operates fully without a computer using the MAX4466 microphone:
 - OLED shows all status in real-time
 - Powered from USB powerbank — auto-switches to MIC input if no USB host detected within 3 seconds
 
-### Carrier Mode
-If USB is not connected within 10 seconds of startup, the device automatically starts CW transmission on 2400.300 MHz at full power.
-
 ## CDC Commands
 
 After connecting USB, a serial port is available with the following commands:
@@ -405,13 +402,6 @@ QO-100 Narrowband Transponder:
 
 ### v1.1.0
 - Initial release with basic SSB TX functionality
-
-## TODO
-
-- [ ] Add preset system for saving/loading configurations
-- [ ] Spectrum analyzer — implement real FFT-based display in GUI (placeholder already in place)
-- [ ] GPSDO / 10 MHz reference input for improved frequency stability and accuracy
-- [ ] VOX (voice-activated TX) for MIC mode
 
 ## Warning
 
