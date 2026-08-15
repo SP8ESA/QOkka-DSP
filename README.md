@@ -71,24 +71,6 @@ Code generated with assistance from **Claude Opus 4** and **GPT 5.2**.
 ![OLED display](img/disp.jpg)
 *SSD1306 OLED showing frequency, mode, TX state and current parameter*
 
-## Architecture
-
-```
-Core0 (USB + DSP Producer)            Core1 (Radio Consumer)
-┌──────────────────────────┐          ┌──────────────────────────┐
-│ USB Audio @ 48kHz        │          │ Timer IRQ @ 8kHz         │
-│   or MIC ADC @ 8kHz      │          │ Read from block buffer   │
-│ Downsample 48k → 8k      │          │ Hilbert transform        │
-│ DSP: BP → EQ → Comp      │ ───────► │ I/Q modulation           │
-│ MIC: AGC + noise gate    │          │ SX1280 SPI TX            │
-│ Write to block buffer    │          │                          │
-│ Encoder / button poll    │          │ CW carrier (TUNE mode)   │
-│ OLED refresh via DMA     │          │                          │
-│ CDC command handler      │          │                          │
-│ Status push to GUI       │          │                          │
-└──────────────────────────┘          └──────────────────────────┘
-```
-
 ## Wiring Diagram
 
 See [WIRING.txt](WIRING.txt) for detailed visual diagrams.
@@ -125,10 +107,6 @@ USB                ───────── To computer (Audio + CDC)
 ```
 
 All encoder/button inputs use internal pull-ups (active LOW).
-
-### IMPORTANT - TCXO Module
-
-The LoRa1280F27-TCXO module requires **TCXO_EN to be HIGH BEFORE SX1280 reset**!
 
 ## Building
 
@@ -178,13 +156,6 @@ Run the GUI:
 pip install pyserial
 python3 gui.py
 ```
-
-Features:
-- **Live synchronization** — GUI updates in real-time when encoder/buttons change parameters on hardware
-- **RF & DSP tab** — Frequency (0.1 kHz precision), PPM, TX power, bandpass, EQ, compressor, power shaping
-- **Console tab** — Serial log, manual CDC commands
-- Auto-detection of SX1280 USB device
-
 ### Standalone Operation
 
 The device operates fully without a computer using the MAX4466 microphone:
@@ -213,45 +184,18 @@ After connecting USB, a serial port is available with the following commands:
 | `tune 0/1` | Toggle TUNE carrier |
 | `cw` | Start CW test |
 | `stop` | Stop CW transmission |
-
-### Frequency Configuration
-
-| Command | Description |
-|---------|-------------|
 | `freq <Hz>` | Set frequency with sub-Hz precision (e.g. `freq 2400100050.5`) |
 | `ppm <value>` | Oscillator PPM correction (e.g. `ppm -0.5`) |
-
-**Note:** Frequency is automatically split into PLL steps (~198 Hz resolution) plus fine DSP offset for sub-Hz precision.
-
-### DSP Block Enable/Disable
-
-| Command | Description |
-|---------|-------------|
 | `enable bp 0/1` | Enable/disable bandpass filter |
 | `enable eq 0/1` | Enable/disable equalizer |
 | `enable comp 0/1` | Enable/disable compressor |
-
-### Bandpass Filter Settings
-
-| Command | Description |
-|---------|-------------|
 | `set bp_lo <Hz>` | Lower filter frequency (default 200 Hz) |
 | `set bp_hi <Hz>` | Upper filter frequency (default 2700 Hz) |
 | `set bp_stages <1-10>` | Filter steepness (12 dB/oct per stage) |
-
-### Equalizer Settings
-
-| Command | Description |
-|---------|-------------|
 | `set eq_low_hz <Hz>` | Low shelf frequency |
 | `set eq_low_db <dB>` | Low shelf gain |
 | `set eq_high_hz <Hz>` | High shelf frequency |
 | `set eq_high_db <dB>` | High shelf gain |
-
-### Compressor Settings
-
-| Command | Description |
-|---------|-------------|
 | `set comp_thr <dB>` | Compressor threshold |
 | `set comp_ratio <n>` | Compression ratio |
 | `set comp_att <ms>` | Attack time |
@@ -259,24 +203,9 @@ After connecting USB, a serial port is available with the following commands:
 | `set comp_makeup <dB>` | Makeup gain |
 | `set comp_knee <dB>` | Knee width |
 | `set comp_outlim <0..1>` | Output limiter |
-
-### Amplifier Settings
-
-| Command | Description |
-|---------|-------------|
 | `set amp_gain <float>` | Final gain |
 | `set amp_min_a <float>` | Minimum amplitude |
-
-### Additional Commands
-
-| Command | Description |
-|---------|-------------|
 | `txpwr <-18..13>` | Max TX power on SX1280 chip in dBm |
-
-### Audio Source & Microphone AGC
-
-| Command | Description |
-|---------|-------------|
 | `src pc` | Switch to PC (USB audio) input |
 | `src mic` | Switch to MIC (ADC0) input |
 | `set mic_agc_target <0..1>` | AGC target level (default 0.75) |
@@ -284,16 +213,11 @@ After connecting USB, a serial port is available with the following commands:
 | `set mic_agc_attack <float>` | AGC attack coefficient (default 0.01) |
 | `set mic_agc_release <float>` | AGC release coefficient (default 0.0001) |
 | `set mic_gate_thresh <float>` | Noise gate threshold (default 0.005) |
-
-### FM Mode Settings
-
-> **⚠️ FM mode is for general 2.4 GHz amateur use only — DO NOT use FM on QO-100!**
-
-| Command | Description |
-|---------|-------------|
 | `set fm_dev <200..100000>` | FM deviation in Hz (default 2500, i.e. NBFM ±2.5 kHz) |
 | `set ctcss <freq\|0>` | CTCSS sub-audible tone in Hz (0 = off; e.g. `set ctcss 88.5`) |
 
+
+> **⚠️ FM mode is for general 2.4 GHz amateur use only — DO NOT use FM on QO-100!**
 Standard CTCSS tones from 67.0 to 254.1 Hz are supported. The tone is mixed at ~15% of deviation (standard level).
 
 ## Technical Specifications
@@ -406,10 +330,6 @@ QO-100 Narrowband Transponder:
 ## Warning
 
 **Transmission on 2.4 GHz requires appropriate radio license!**
-
-Make sure you have a valid amateur radio license and comply with regulations in your country.
-
-**⚠️ DO NOT transmit FM on the QO-100 narrowband transponder!** The QO-100 NB transponder is for SSB/CW only. FM transmission will cause interference and is prohibited. Use FM mode only outside the QO-100 transponder passband.
 
 ## License
 
