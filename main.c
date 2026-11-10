@@ -611,8 +611,7 @@ static int16_t interpolate_stereo_to_mono(const uint32_t phase_q16,
     return clamp16((int32_t)mono);
 }
 
-static void update_resampler_phase_and_samples(
-                                        uint32_t *phase_q16,
+static void update_resampler_phase_and_samples(uint32_t *phase_q16,
                                         const uint32_t step_q16,
                                         stereo16_t *s0,
                                         stereo16_t *s1,
