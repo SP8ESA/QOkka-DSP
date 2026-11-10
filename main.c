@@ -2023,7 +2023,7 @@ static void cdc_handle_line(char *line) {
         } else if(streqi(argv[1], "digital")) {
             g_audio_modulation = AUDIO_MODULATION_DIGITAL;
         } else {
-            cdc_write_str("ERR: audio_mode |ssb|digital\r\n"); 
+            cdc_write_str("ERR: audio_mode ssb|digital\r\n"); 
             return;           
         }
         
