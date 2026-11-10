@@ -579,7 +579,7 @@ typedef enum {
     AUDIO_MODULATION_DIGITAL
 } audio_modulation_t;
 
-static volatile audio_modulation_t g_audio_modulation = AUDIO_MODULATION_SSB;
+static volatile audio_modulation_t g_audio_modulation = AUDIO_MODULATION_DIGITAL;
 
 static int16_t interpolate_stereo_to_mono(const uint32_t phase_q16, 
                                         const stereo16_t s0, 
@@ -1728,6 +1728,11 @@ static void cfg_print(void) {
         c.mic_gate_thresh, g_audio_src ? "MIC" : "PC",
         g_fm_deviation_hz, g_ctcss_freq
     );
+    cdc_printf(
+        "audio_mode=%s resampler=%s\r\n",
+        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB",
+        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "FIXED" : "ADAPTIVE"
+    );
 }
 
 static void cmd_help(void) {
@@ -1746,6 +1751,7 @@ static void cmd_help(void) {
         "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n"
         "  txpwr <-18..13> - set max TX power in dBm\r\n"
         "  enable <bp|eq|comp> <0|1|on|off>\r\n"
+        "  audio_mode ssb|digital - USB audio resampling mode\r\n"
         "  set bp_lo <Hz>\r\n"
         "  set bp_hi <Hz>\r\n"
         "  set bp_stages <1-10>  (filter steepness: 12dB/oct per stage)\r\n"
@@ -1999,6 +2005,32 @@ static void cdc_handle_line(char *line) {
         if (g_tune_active) tune_apply_settings();
         return;
     }
+
+    //audio_mode command: SSB|DIGITAL
+    // audio_mode ssb|digital
+    if (streqi(argv[0], "audio_mode")) {
+        
+        if (argc == 1) {
+            cdc_printf("audio_mode=%s\r\n", g_audio_modulation  == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB");
+            return;
+        }
+        if (argc !=2) {
+            cdc_write_str("ERR: audio_mode |ssb|digital\r\n"); 
+            return; 
+        }
+        if (streqi(argv[1], "ssb")) {
+            g_audio_modulation = AUDIO_MODULATION_SSB;
+        } else if(streqi(argv[1], "digital")) {
+            g_audio_modulation = AUDIO_MODULATION_DIGITAL;
+        } else {
+            cdc_write_str("ERR: audio_mode |ssb|digital\r\n"); 
+            return;           
+        }
+        
+        cdc_printf("OK audio_mode=%s\r\n", g_audio_modulation  == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB");
+        return;
+    }
+
 
     audio_cfg_t c;
     __compiler_memory_barrier();
