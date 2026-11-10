@@ -1707,6 +1707,11 @@ static void cfg_print(void) {
         g_tune_active ? "ON" : "OFF",
         corr_str, (unsigned long)get_base_steps(), fine);
     cdc_printf(
+        "  audio_mode=%s resampler=%s\r\n",
+        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB",
+        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "FIXED" : "ADAPTIVE"
+    );        
+    cdc_printf(
         "  enable bp=%u eq=%u comp=%u\r\n"
         "  bp_lo=%.1f bp_hi=%.1f bp_stages=%u (%u dB/oct)\r\n"
         "  eq_low_hz=%.1f eq_low_db=%.1f\r\n"
@@ -1728,11 +1733,6 @@ static void cfg_print(void) {
         c.mic_gate_thresh, g_audio_src ? "MIC" : "PC",
         g_fm_deviation_hz, g_ctcss_freq
     );
-    cdc_printf(
-        "audio_mode=%s resampler=%s\r\n",
-        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB",
-        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "FIXED" : "ADAPTIVE"
-    );
 }
 
 static void cmd_help(void) {
@@ -1743,31 +1743,37 @@ static void cmd_help(void) {
         "  diag          - show SX1280 status\r\n"
         "  tx 0|1        - enable/disable TX (SSB modulation)\r\n"
         "  mode usb|cw|fm - set modulation mode\r\n"
-        "  src pc|mic    - audio source (PC=USB audio, MIC=ADC0)\r\n"
+        "  src pc|mic    - audio source (PC=USB audio, MIC=ADC0)\r\n");
+    cdc_write_str(    
         "  tune 0|1      - toggle TUNE carrier\r\n"
         "  cw            - start CW test transmission\r\n"
         "  stop          - stop CW transmission\r\n"
         "  freq <Hz>     - set frequency with sub-Hz precision (e.g. freq 2400100050.5)\r\n"
-        "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n"
+        "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n");
+    cdc_write_str(    
         "  txpwr <-18..13> - set max TX power in dBm\r\n"
         "  enable <bp|eq|comp> <0|1|on|off>\r\n"
         "  audio_mode ssb|digital - USB audio resampling mode\r\n"
         "  set bp_lo <Hz>\r\n"
-        "  set bp_hi <Hz>\r\n"
+        "  set bp_hi <Hz>\r\n");
+    cdc_write_str(
         "  set bp_stages <1-10>  (filter steepness: 12dB/oct per stage)\r\n"
         "  set eq_low_hz <Hz>\r\n"
         "  set eq_low_db <dB>\r\n"
-        "  set eq_high_hz <Hz>\r\n"
+        "  set eq_high_hz <Hz>\r\n");
+    cdc_write_str(     
         "  set eq_high_db <dB>\r\n"
         "  set comp_thr <dB>\r\n"
         "  set comp_ratio <R>\r\n"
         "  set comp_att <ms>\r\n"
-        "  set comp_rel <ms>\r\n"
+        "  set comp_rel <ms>\r\n");
+    cdc_write_str(
         "  set comp_makeup <dB>\r\n"
         "  set comp_knee <dB>\r\n"
         "  set comp_outlim <0..1>\r\n"
         "  set amp_gain <float>\r\n"
-        "  set amp_min_a <float>\r\n"
+        "  set amp_min_a <float>\r\n");
+    cdc_write_str(
         "  set mic_agc_target <0..1>   (MIC AGC target level)\r\n"
         "  set mic_agc_max_gain <1..200> (MIC AGC max gain)\r\n"
         "  set mic_agc_attack <coeff>  (MIC AGC attack speed)\r\n"
