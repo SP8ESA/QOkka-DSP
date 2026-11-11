@@ -1748,7 +1748,7 @@ static void cmd_help(void) {
         "  cw            - start CW test transmission\r\n"
         "  stop          - stop CW transmission\r\n"
         "  freq <Hz>     - set frequency with sub-Hz precision (e.g. freq 2400100050.5)\r\n"
-        "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n"    
+        "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n"
         "  txpwr <-18..13> - set max TX power in dBm\r\n"
         "  enable <bp|eq|comp> <0|1|on|off>\r\n"
         "  audio_mode ssb|digital - USB audio resampling mode\r\n"
