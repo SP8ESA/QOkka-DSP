@@ -978,7 +978,7 @@ class SX1280ControlApp(ttk.Frame):
     def _handle_status_push(self, line):
         """Parse firmware status push and update GUI widgets.
 
-        Format: '!S mode=1 tune=0 tx=1 pwr=13 ppm=0.12 freq=2400100000.0 resampling=0'
+        Format: '!S mode=1 tune=0 tx=1 pwr=13 ppm=0.12 freq=2400100000.0 resampling=adaprive'
 
         Fixes:
         - TX Power label: LabeledScale trace_add auto-updates on .set()
