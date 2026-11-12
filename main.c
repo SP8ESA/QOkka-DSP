@@ -1708,8 +1708,7 @@ static void cfg_print(void) {
         g_tune_active ? "ON" : "OFF",
         corr_str, (unsigned long)get_base_steps(), fine);
     cdc_printf(
-        "  audio_mode=%s resampler=%s\r\n",
-        g_resampling_mode == RESAMPLING_MODE_FIXED ? "DIGITAL" : "SSB",
+        "  resampling=%s\r\n",
         g_resampling_mode == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE"
     );        
     cdc_printf(
@@ -1850,12 +1849,13 @@ static void cdc_status_push_ex(bool force) {
     if (ctcss_frac >= 10) { ctcss_int++; ctcss_frac = 0; }
 
     snprintf(status_buf, sizeof(status_buf),
-             "!S mode=%u tune=%u tx=%u src=%u pwr=%d ppm=%s%lu.%04lu freq=%s fm_dev=%lu ctcss=%lu.%lu\r\n",
+             "!S mode=%u tune=%u tx=%u src=%u pwr=%d ppm=%s%lu.%04lu freq=%s fm_dev=%lu ctcss=%lu.%lu resampling=%s\r\n",
              cur_mode, cur_tune, cur_tx, cur_src, cur_pwr,
              ppm_neg ? "-" : "", (unsigned long)ppm_int, (unsigned long)ppm_frac,
              freq_str,
              (unsigned long)fm_dev_int,
-             (unsigned long)ctcss_int, (unsigned long)ctcss_frac);
+             (unsigned long)ctcss_int, (unsigned long)ctcss_frac,
+             g_resampling_mode == RESAMPLING_MODE_ADAPTIVE ? "adaptive" : "fixed");
     cdc_write_str(status_buf);
 
     last_mode = cur_mode;
