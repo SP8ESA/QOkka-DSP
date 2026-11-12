@@ -627,8 +627,6 @@ static void mic_timer_stop(void) {
 // Read host audio (PCM16LE stereo), push to ringbuffer
 static void usb_audio_pump(void);
 
-//static volatile resampling_mode_t g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
-
 static int16_t interpolate_stereo_to_mono(const uint32_t phase_q16, 
                                         const stereo16_t s0, 
                                         const stereo16_t s1,
