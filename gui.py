@@ -70,6 +70,7 @@ class TxConfig:
     mic_agc_attack: float = 0.01
     mic_agc_release: float = 0.0001
     mic_gate_thresh: float = 0.005
+    resampling: str = "adaptive"
 
 
 # ============================================================
@@ -364,6 +365,7 @@ class SX1280ControlApp(ttk.Frame):
         self.mic_gate_thresh_var = tk.DoubleVar(value=self.config.mic_gate_thresh)
         self.fm_dev_var = tk.DoubleVar(value=2500.0)
         self.ctcss_var = tk.StringVar(value="Off")
+        self.resampling_var = tk.StringVar(value=self.config.resampling)
 
     # ----------------------------------------------------------
     def _build_ui(self):
@@ -428,7 +430,7 @@ class SX1280ControlApp(ttk.Frame):
         ttk.Radiobutton(mt_inner, text="FM", variable=self.mode_var,
                          value="fm", command=self._on_mode_change).pack(side="left", padx=5)
 
-        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=15, pady=2)
+        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=10, pady=2)
 
         ttk.Label(mt_inner, text="Src:").pack(side="left", padx=(0, 5))
         ttk.Radiobutton(mt_inner, text="PC", variable=self.src_var,
@@ -436,17 +438,25 @@ class SX1280ControlApp(ttk.Frame):
         ttk.Radiobutton(mt_inner, text="MIC", variable=self.src_var,
                          value="mic", command=self._on_src_change).pack(side="left", padx=5)
 
-        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=15, pady=2)
+        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=10, pady=2)
 
-        self.tune_button = tk.Button(mt_inner, text="TUNE OFF", width=12,
+        ttk.Label(mt_inner, text="Resampling:").pack(side="left", padx=(0, 5))
+        ttk.Radiobutton(mt_inner, text="Adaptive", variable=self.resampling_var,
+                         value="adaptive", command=self._on_resampling_change).pack(side="left", padx=5)
+        ttk.Radiobutton(mt_inner, text="Fixed", variable=self.resampling_var,
+                         value="fixed", command=self._on_resampling_change).pack(side="left", padx=5)
+
+        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=10, pady=2)
+
+        self.tune_button = tk.Button(mt_inner, text="TUNE OFF", width=7,
                                       font=("TkDefaultFont", 10, "bold"),
                                       command=self._toggle_tune, relief="raised", bd=3,
                                       bg="#cccccc", fg="black")
         self.tune_button.pack(side="left", padx=5)
 
-        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=15, pady=2)
+        ttk.Separator(mt_inner, orient="vertical").pack(side="left", fill="y", padx=10, pady=2)
 
-        self.tx_button = tk.Button(mt_inner, text="TX OFF", width=10,
+        self.tx_button = tk.Button(mt_inner, text="TX OFF", width=7,
                                     font=("TkDefaultFont", 10, "bold"),
                                     command=self._toggle_tx, relief="raised", bd=3)
         self.tx_button.pack(side="left", padx=5)
@@ -809,6 +819,12 @@ class SX1280ControlApp(ttk.Frame):
         src = self.src_var.get()
         self._send_cmd_safe(f"src {src}")
 
+    def _on_resampling_change(self):
+        if self._status_updating:
+            return
+        resampling = self.resampling_var.get()
+        self._send_cmd_safe(f"resampling {resampling}")
+
     def _toggle_tune(self):
         new_state = not self.tune_var.get()
         self.tune_var.set(new_state)
@@ -927,6 +943,7 @@ class SX1280ControlApp(ttk.Frame):
         self._send_cmd_safe(f"set comp_outlim {self.comp_outlim_var.get():.3f}")
         self._send_cmd_safe(f"set amp_gain {self.amp_gain_var.get():.3f}")
         self._send_cmd_safe(f"set amp_min_a {self.amp_min_a_var.get()}")
+        self._send_cmd_safe(f"resampling {self.resampling_var.get()}")
         self._log("All settings sent", "info")
 
     # === Logging ===
@@ -961,7 +978,7 @@ class SX1280ControlApp(ttk.Frame):
     def _handle_status_push(self, line):
         """Parse firmware status push and update GUI widgets.
 
-        Format: '!S mode=1 tune=0 tx=1 pwr=13 ppm=0.12 freq=2400100000.0'
+        Format: '!S mode=1 tune=0 tx=1 pwr=13 ppm=0.12 freq=2400100000.0 resampling=adaptive'
 
         Fixes:
         - TX Power label: LabeledScale trace_add auto-updates on .set()
@@ -1011,6 +1028,12 @@ class SX1280ControlApp(ttk.Frame):
                 if abs(self.ppm_var.get() - new_ppm) > 0.0001:
                     self.ppm_var.set(new_ppm)
                     self.ppm_label.config(text=f"{new_ppm:.3f} ppm")
+
+            if "resampling" in kv:
+                new_resampling = str(kv["resampling"])
+
+                if self.resampling_var.get() != new_resampling:
+                    self.resampling_var.set(new_resampling)
 
             if "freq" in kv:
                 new_freq = float(kv["freq"])

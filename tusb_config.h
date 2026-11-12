@@ -87,7 +87,7 @@ extern "C" {
 #endif
 
 #ifndef CFG_TUD_CDC_TX_BUFSIZE
-#define CFG_TUD_CDC_TX_BUFSIZE    512
+#define CFG_TUD_CDC_TX_BUFSIZE    2048
 #endif
 
 //--------------------------------------------------------------------+

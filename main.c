@@ -574,77 +574,18 @@ static void mic_timer_stop(void) {
 // Read host audio (PCM16LE stereo), push to ringbuffer
 static void usb_audio_pump(void);
 
-// Resampler: host SR stereo -> 8 kHz mono
-// With smoothed adaptive rate to prevent buffer overflow and pitch artifacts
-static int16_t usb_audio_get_mono_8k(void) {
-    static uint32_t src_rate = 48000u;
-    static uint32_t base_step_q16 = 0;
-    static uint32_t smooth_step_q16 = 0;  // Smoothed step for gradual changes
-    static uint32_t phase_q16 = 0;
+typedef enum {
+    RESAMPLING_MODE_ADAPTIVE = 0,
+    RESAMPLING_MODE_FIXED
+} resampling_mode_t;
 
-    static stereo16_t s0 = {0,0};
-    static stereo16_t s1 = {0,0};
-    static stereo16_t s2 = {0,0};  // Extra sample for cubic interpolation
-    static stereo16_t sm1 = {0,0}; // s[-1] for cubic
-    static bool primed = false;
+static volatile resampling_mode_t g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
 
-    uint32_t sr = g_usb_sample_rate_hz;
-    if (!sr) sr = 48000u;
-
-    if (sr != src_rate || base_step_q16 == 0) {
-        src_rate = sr;
-        base_step_q16 = (uint32_t)(((uint64_t)src_rate << 16) / (uint32_t)WAV_SAMPLE_RATE);
-        smooth_step_q16 = base_step_q16;
-    }
-
-    // *** Adaptive rate with heavy smoothing ***
-    uint32_t usb_w = g_usb_w;
-    uint32_t usb_r = g_usb_r;
-    uint32_t fill = (usb_w >= usb_r) ? (usb_w - usb_r) : (USB_RB_FRAMES - usb_r + usb_w);
-    
-    const uint32_t target_fill = USB_RB_FRAMES / 2;
-    uint32_t target_step = base_step_q16;
-    
-    if (fill > target_fill) {
-        uint32_t excess = fill - target_fill;
-        uint32_t adj = (base_step_q16 * excess) / (USB_RB_FRAMES * 10);
-        target_step = base_step_q16 + adj;
-    } else if (fill < target_fill) {
-        uint32_t deficit = target_fill - fill;
-        uint32_t adj = (base_step_q16 * deficit) / (USB_RB_FRAMES * 10);
-        target_step = base_step_q16 - adj;
-    }
-    
-    // Heavy smoothing: move only 1/256 of the way to target each sample
-    // This prevents audible pitch wobble
-    if (smooth_step_q16 < target_step) {
-        uint32_t diff = target_step - smooth_step_q16;
-        smooth_step_q16 += (diff >> 8) + 1;
-        if (smooth_step_q16 > target_step) smooth_step_q16 = target_step;
-    } else if (smooth_step_q16 > target_step) {
-        uint32_t diff = smooth_step_q16 - target_step;
-        smooth_step_q16 -= (diff >> 8) + 1;
-        if (smooth_step_q16 < target_step) smooth_step_q16 = target_step;
-    }
-
-    if (!primed) {
-        if (!usb_rb_pop(&sm1)) sm1 = (stereo16_t){0,0};
-        if (!usb_rb_pop(&s0)) s0 = (stereo16_t){0,0};
-        if (!usb_rb_pop(&s1)) s1 = (stereo16_t){0,0};
-        if (!usb_rb_pop(&s2)) s2 = (stereo16_t){0,0};
-        phase_q16 = 0;
-        primed = true;
-    }
-
-    phase_q16 += smooth_step_q16;
-    while (phase_q16 >= (1u << 16)) {
-        phase_q16 -= (1u << 16);
-        sm1 = s0;
-        s0 = s1;
-        s1 = s2;
-        if (!usb_rb_pop(&s2)) s2 = s1;  // Hold last value if empty
-    }
-
+static int16_t interpolate_stereo_to_mono(const uint32_t phase_q16, 
+                                        const stereo16_t s0, 
+                                        const stereo16_t s1,
+                                        const stereo16_t s2,
+                                        const stereo16_t sm1) {
     // Cubic Hermite interpolation for smoother audio
     float t = (float)phase_q16 / 65536.0f;
     float t2 = t * t;
@@ -668,6 +609,109 @@ static int16_t usb_audio_get_mono_8k(void) {
 
     float mono = (l + r) * 0.5f;
     return clamp16((int32_t)mono);
+}
+
+static void update_resampler_phase_and_samples(uint32_t *phase_q16,
+                                        const uint32_t step_q16,
+                                        stereo16_t *s0,
+                                        stereo16_t *s1,
+                                        stereo16_t *s2,
+                                        stereo16_t *sm1) {
+
+    *phase_q16 += step_q16;
+    while (*phase_q16 >= (1u << 16)) {
+        *phase_q16 -= (1u << 16);
+        *sm1 = *s0;
+        *s0 = *s1;
+        *s1 = *s2;
+        if (!usb_rb_pop(s2)) *s2 = *s1;  // Hold last value if empty
+    }
+}
+static uint32_t calculate_resampling_step(const uint32_t base_step_q16,
+                                        const uint32_t usb_w,
+                                        const uint32_t usb_r,
+                                        uint32_t *smooth_step_q16) {
+    // *** Adaptive rate with heavy smoothing ***
+
+    const uint32_t fill = (usb_w >= usb_r) ? (usb_w - usb_r) : (USB_RB_FRAMES - usb_r + usb_w);
+
+    const uint32_t target_fill = USB_RB_FRAMES / 2;
+    uint32_t target_step = base_step_q16;
+    
+    if (fill > target_fill) {
+        uint32_t excess = fill - target_fill;
+        uint32_t adj = (base_step_q16 * excess) / (USB_RB_FRAMES * 10);
+        target_step = base_step_q16 + adj;
+    } else if (fill < target_fill) {
+        uint32_t deficit = target_fill - fill;
+        uint32_t adj = (base_step_q16 * deficit) / (USB_RB_FRAMES * 10);
+        target_step = base_step_q16 - adj;
+    }
+    
+    // Heavy smoothing: move only 1/256 of the way to target each sample
+    // This prevents audible pitch wobble
+    if (*smooth_step_q16 < target_step) {
+        uint32_t diff = target_step - *smooth_step_q16;
+        *smooth_step_q16 += (diff >> 8) + 1;
+        if (*smooth_step_q16 > target_step) *smooth_step_q16 = target_step;
+    } else if (*smooth_step_q16 > target_step) {
+        uint32_t diff = *smooth_step_q16 - target_step;
+        *smooth_step_q16 -= (diff >> 8) + 1;
+        if (*smooth_step_q16 < target_step) *smooth_step_q16 = target_step;
+    }
+    return *smooth_step_q16;
+}
+
+static int16_t usb_audio_get_mono_8k_int(const resampling_mode_t resampling_mode) {
+    static uint32_t src_rate = 48000u;
+    static uint32_t base_step_q16 = 0;
+    static uint32_t smooth_step_q16 = 0;  // Smoothed step for gradual changes
+    static uint32_t phase_q16 = 0;
+
+    static stereo16_t s0 = {0,0};
+    static stereo16_t s1 = {0,0};
+    static stereo16_t s2 = {0,0};  // Extra sample for cubic interpolation
+    static stereo16_t sm1 = {0,0}; // s[-1] for cubic
+    static bool primed = false;
+
+    uint32_t sr = g_usb_sample_rate_hz;
+    if (!sr) sr = 48000u;
+
+    if (sr != src_rate || base_step_q16 == 0) {
+        src_rate = sr;
+        base_step_q16 = (uint32_t)(((uint64_t)src_rate << 16) / (uint32_t)WAV_SAMPLE_RATE);
+        smooth_step_q16 = base_step_q16;
+    }
+
+    uint32_t step_q16;
+    
+    if (resampling_mode == RESAMPLING_MODE_FIXED) {
+        //fixed resampling for digital modes such as FT8/FT4
+        step_q16 = base_step_q16;
+        smooth_step_q16 = base_step_q16;
+    } else {
+        //Adaptive resampling for non-digi
+        step_q16 = calculate_resampling_step(base_step_q16, g_usb_w, g_usb_r, &smooth_step_q16);
+    }
+
+    if (!primed) {
+        if (!usb_rb_pop(&sm1)) sm1 = (stereo16_t){0,0};
+        if (!usb_rb_pop(&s0)) s0 = (stereo16_t){0,0};
+        if (!usb_rb_pop(&s1)) s1 = (stereo16_t){0,0};
+        if (!usb_rb_pop(&s2)) s2 = (stereo16_t){0,0};
+        phase_q16 = 0;
+        primed = true;
+    }
+
+    update_resampler_phase_and_samples(&phase_q16, step_q16, &s0, &s1, &s2, &sm1);
+
+    return interpolate_stereo_to_mono(phase_q16, s0, s1, s2, sm1);
+}
+
+// Resampler: host SR stereo -> 8 kHz mono
+// With smoothed adaptive rate to prevent buffer overflow and pitch artifacts
+static int16_t usb_audio_get_mono_8k(void) {
+    return usb_audio_get_mono_8k_int(g_resampling_mode);
 }
 
 // ==========================================================
@@ -1664,6 +1708,10 @@ static void cfg_print(void) {
         g_tune_active ? "ON" : "OFF",
         corr_str, (unsigned long)get_base_steps(), fine);
     cdc_printf(
+        "  resampling=%s\r\n",
+        g_resampling_mode == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE"
+    );        
+    cdc_printf(
         "  enable bp=%u eq=%u comp=%u\r\n"
         "  bp_lo=%.1f bp_hi=%.1f bp_stages=%u (%u dB/oct)\r\n"
         "  eq_low_hz=%.1f eq_low_db=%.1f\r\n"
@@ -1703,6 +1751,7 @@ static void cmd_help(void) {
         "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n"
         "  txpwr <-18..13> - set max TX power in dBm\r\n"
         "  enable <bp|eq|comp> <0|1|on|off>\r\n"
+        "  resampling adaptive|fixed - USB audio resampling mode\r\n"
         "  set bp_lo <Hz>\r\n"
         "  set bp_hi <Hz>\r\n"
         "  set bp_stages <1-10>  (filter steepness: 12dB/oct per stage)\r\n"
@@ -1800,12 +1849,13 @@ static void cdc_status_push_ex(bool force) {
     if (ctcss_frac >= 10) { ctcss_int++; ctcss_frac = 0; }
 
     snprintf(status_buf, sizeof(status_buf),
-             "!S mode=%u tune=%u tx=%u src=%u pwr=%d ppm=%s%lu.%04lu freq=%s fm_dev=%lu ctcss=%lu.%lu\r\n",
+             "!S mode=%u tune=%u tx=%u src=%u pwr=%d ppm=%s%lu.%04lu freq=%s fm_dev=%lu ctcss=%lu.%lu resampling=%s\r\n",
              cur_mode, cur_tune, cur_tx, cur_src, cur_pwr,
              ppm_neg ? "-" : "", (unsigned long)ppm_int, (unsigned long)ppm_frac,
              freq_str,
              (unsigned long)fm_dev_int,
-             (unsigned long)ctcss_int, (unsigned long)ctcss_frac);
+             (unsigned long)ctcss_int, (unsigned long)ctcss_frac,
+             g_resampling_mode == RESAMPLING_MODE_ADAPTIVE ? "adaptive" : "fixed");
     cdc_write_str(status_buf);
 
     last_mode = cur_mode;
@@ -1956,6 +2006,32 @@ static void cdc_handle_line(char *line) {
         if (g_tune_active) tune_apply_settings();
         return;
     }
+
+    //resampling command: ADAPTIVE|FIXED
+    // resampling adaptive|fixed
+    if (streqi(argv[0], "resampling")) {
+        
+        if (argc == 1) {
+            cdc_printf("resampling=%s\r\n", g_resampling_mode  == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE");
+            return;
+        }
+        if (argc !=2) {
+            cdc_write_str("ERR: resampling adaptive|fixed\r\n"); 
+            return; 
+        }
+        if (streqi(argv[1], "adaptive")) {
+            g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
+        } else if(streqi(argv[1], "fixed")) {
+            g_resampling_mode = RESAMPLING_MODE_FIXED;
+        } else {
+            cdc_write_str("ERR: resampling adaptive|fixed\r\n"); 
+            return;           
+        }
+        
+        cdc_printf("OK resampling=%s\r\n", g_resampling_mode  == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE");
+        return;
+    }
+
 
     audio_cfg_t c;
     __compiler_memory_barrier();
