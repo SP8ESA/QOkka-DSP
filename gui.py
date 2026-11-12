@@ -1035,6 +1035,19 @@ class SX1280ControlApp(ttk.Frame):
                 if self.resampling_var.get() != new_resampling:
                     self.resampling_var.set(new_resampling)
 
+            if "bp" in kv:
+                new_bp = int(kv["bp"])
+                if self.en_bp_var.get() != new_bp:
+                    self.en_bp_var.set(new_bp)
+            if "eq" in kv:
+                new_eq = int(kv["eq"])
+                if self.en_eq_var.get() != new_eq:
+                    self.en_eq_var.set(new_eq)
+            if "comp" in kv:
+                new_comp = int(kv["comp"])
+                if self.en_comp_var.get() != new_comp:
+                    self.en_comp_var.set(new_comp)                                        
+
             if "freq" in kv:
                 new_freq = float(kv["freq"])
                 if abs(self.config.freq_hz - new_freq) > 0.5:

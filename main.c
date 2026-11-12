@@ -26,6 +26,9 @@
 // OLED display
 #include "ssd1306.h"
 
+#include "audio_config.h"
+#include "resampling.h"
+
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
@@ -146,11 +149,6 @@ static const uint32_t SX_SPI_BAUD = 18000000;
 
 #define RAMP_TIME           0xE0     // 20 us
 
-typedef enum {
-    RESAMPLING_MODE_ADAPTIVE = 0,
-    RESAMPLING_MODE_FIXED
-} resampling_mode_t;
-
 
 // --- Runtime RF config (adjustable via CDC) ---
 // Frequency stored as double for sub-Hz precision; automatically split into PLL steps + fine DSP offset
@@ -244,6 +242,38 @@ static volatile menu_item_t g_menu_cursor = MENU_MODE;
 static volatile uint8_t     g_menu_editing = 0;  // 1 when encoder edits selected item
 static volatile uint32_t    g_menu_scroll_top = 0; // top visible menu row
 
+static volatile audio_cfg_t g_cfg = {
+    .enable_bandpass = AUDIO_ENABLE_BANDPASS,
+    .enable_eq       = AUDIO_ENABLE_EQ,
+    .enable_comp     = AUDIO_ENABLE_COMPRESSOR,
+
+    .bp_lo_hz  = AUDIO_BP_LO_HZ,
+    .bp_hi_hz  = AUDIO_BP_HI_HZ,
+    .bp_stages = AUDIO_BP_DEFAULT_STAGES,
+
+    .eq_low_hz  = EQ_LOW_SHELF_HZ,
+    .eq_low_db  = EQ_LOW_SHELF_DB,
+    .eq_high_hz = EQ_HIGH_SHELF_HZ,
+    .eq_high_db = EQ_HIGH_SHELF_DB,
+
+    .comp_thr_db     = COMP_THRESHOLD_DB,
+    .comp_ratio      = COMP_RATIO,
+    .comp_attack_ms  = COMP_ATTACK_MS,
+    .comp_release_ms = COMP_RELEASE_MS,
+    .comp_makeup_db  = COMP_MAKEUP_DB,
+    .comp_knee_db    = COMP_KNEE_DB,
+    .comp_out_limit  = COMP_OUTPUT_LIMIT,
+
+    .amp_gain  = AMP_GAIN,
+    .amp_min_a = AMP_MIN_A,
+
+    .mic_agc_target   = 0.75f,
+    .mic_agc_max_gain = 1.0f,
+    .mic_agc_attack   = 0.01f,
+    .mic_agc_release  = 0.0001f,
+    .mic_gate_thresh  = 0.005f,   // Below this envelope, output is silenced
+};
+
 // Forward decl (used by CDC help output well before the UI section)
 static const char *mode_label(uint8_t m);
 
@@ -292,6 +322,9 @@ typedef struct __attribute__((packed)) {
     uint8_t  roger_beep;       // 0=off 1=on (FM only)
     uint8_t  _reserved[2];
     uint8_t resampling;
+    uint8_t eq;
+    uint8_t bpf;
+    uint8_t comp;
     uint32_t crc32;            // CRC32 over everything above
 } persist_cfg_t;
 
@@ -331,7 +364,13 @@ static void persist_collect(persist_cfg_t *c) {
     c->fm_deviation_hz = g_fm_deviation_hz;
     c->ctcss_freq      = g_ctcss_freq;
     c->roger_beep      = g_roger_beep;
+
     c->resampling      = g_resampling_mode;
+
+    c->bpf             = g_cfg.enable_bandpass;
+    c->eq              = g_cfg.enable_eq;
+    c->comp            = g_cfg.enable_comp;
+
     c->crc32           = persist_cfg_crc(c);
 }
 
@@ -372,6 +411,10 @@ static void persist_apply(const persist_cfg_t *c) {
     g_roger_beep = (c->roger_beep != 0) ? 1 : 0;
 
     g_resampling_mode = (c->resampling == 0) ? RESAMPLING_MODE_ADAPTIVE : RESAMPLING_MODE_FIXED;
+
+    g_cfg.enable_bandpass = c->bpf;
+    g_cfg.enable_comp = c->comp;
+    g_cfg.enable_eq = c->eq;
 }
 
 static bool persist_load(void) {
@@ -1469,73 +1512,9 @@ static inline float compressor_process(compressor_t *c, float x) {
     return x * g_lin;
 }
 
-// ==========================================================
-// Runtime-configurable DSP settings (over USB CDC)
-// ==========================================================
-typedef struct {
-    uint8_t enable_bandpass;
-    uint8_t enable_eq;
-    uint8_t enable_comp;
 
-    float bp_lo_hz;
-    float bp_hi_hz;
-    uint8_t bp_stages;      // 1-10, each stage = 12 dB/octave
 
-    float eq_low_hz;
-    float eq_low_db;
-    float eq_high_hz;
-    float eq_high_db;
 
-    float comp_thr_db;
-    float comp_ratio;
-    float comp_attack_ms;
-    float comp_release_ms;
-    float comp_makeup_db;
-    float comp_knee_db;
-    float comp_out_limit;
-
-    float amp_gain;
-    float amp_min_a;
-
-    // MIC AGC (for ADC microphone input)
-    float mic_agc_target;    // Target envelope level (0..1)
-    float mic_agc_max_gain;  // Maximum gain (prevents noise pumping in silence)
-    float mic_agc_attack;    // Attack coefficient (0..1, higher = faster)
-    float mic_agc_release;   // Release coefficient (0..1, higher = faster)
-    float mic_gate_thresh;   // Noise gate threshold — below this, output is zero
-} audio_cfg_t;
-
-static volatile audio_cfg_t g_cfg = {
-    .enable_bandpass = AUDIO_ENABLE_BANDPASS,
-    .enable_eq       = AUDIO_ENABLE_EQ,
-    .enable_comp     = AUDIO_ENABLE_COMPRESSOR,
-
-    .bp_lo_hz  = AUDIO_BP_LO_HZ,
-    .bp_hi_hz  = AUDIO_BP_HI_HZ,
-    .bp_stages = AUDIO_BP_DEFAULT_STAGES,
-
-    .eq_low_hz  = EQ_LOW_SHELF_HZ,
-    .eq_low_db  = EQ_LOW_SHELF_DB,
-    .eq_high_hz = EQ_HIGH_SHELF_HZ,
-    .eq_high_db = EQ_HIGH_SHELF_DB,
-
-    .comp_thr_db     = COMP_THRESHOLD_DB,
-    .comp_ratio      = COMP_RATIO,
-    .comp_attack_ms  = COMP_ATTACK_MS,
-    .comp_release_ms = COMP_RELEASE_MS,
-    .comp_makeup_db  = COMP_MAKEUP_DB,
-    .comp_knee_db    = COMP_KNEE_DB,
-    .comp_out_limit  = COMP_OUTPUT_LIMIT,
-
-    .amp_gain  = AMP_GAIN,
-    .amp_min_a = AMP_MIN_A,
-
-    .mic_agc_target   = 0.75f,
-    .mic_agc_max_gain = 1.0f,
-    .mic_agc_attack   = 0.01f,
-    .mic_agc_release  = 0.0001f,
-    .mic_gate_thresh  = 0.005f,   // Below this envelope, output is silenced
-};
 static volatile uint8_t g_cfg_dirty = 1;
 
 static void compressor_reconfig(compressor_t *c, float fs, const audio_cfg_t *cfg) {
@@ -1809,6 +1788,12 @@ static void cdc_status_push_ex(bool force) {
     static float    last_fm_dev = -1.0f;
     static float    last_ctcss  = -1.0f;
 
+    static resampling_mode_t last_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
+
+    static uint8_t last_enable_bandpass = AUDIO_ENABLE_BANDPASS;
+    static uint8_t last_enable_eq = AUDIO_ENABLE_EQ;
+    static uint8_t last_enable_comp = AUDIO_ENABLE_COMPRESSOR;
+
     if (!tud_cdc_connected()) return;
 
     uint8_t  cur_mode = g_tx_mode;
@@ -1821,13 +1806,25 @@ static void cdc_status_push_ex(bool force) {
     float    cur_fm_dev = g_fm_deviation_hz;
     float    cur_ctcss  = g_ctcss_freq;
 
+    resampling_mode_t cur_resampling_mode = g_resampling_mode;
+
+    uint8_t cur_enable_bandpass = g_cfg.enable_bandpass;
+    uint8_t cur_enable_eq = g_cfg.enable_eq;
+    uint8_t cur_enable_comp = g_cfg.enable_comp;    
+
+
     if (!force) {
         // Check if anything changed
         bool changed = (cur_mode != last_mode) || (cur_tune != last_tune) ||
                        (cur_tx != last_tx) || (cur_src != last_src) ||
                        (cur_pwr != last_pwr) ||
                        (cur_ppm != last_ppm) || (cur_freq != last_freq) ||
-                       (cur_fm_dev != last_fm_dev) || (cur_ctcss != last_ctcss);
+                       (cur_fm_dev != last_fm_dev) || (cur_ctcss != last_ctcss) ||
+                       (cur_resampling_mode != last_resampling_mode) ||
+
+                       (cur_enable_bandpass != last_enable_bandpass) || 
+                       (cur_enable_eq != last_enable_eq)  ||
+                       (cur_enable_comp != last_enable_comp);
 
         if (!changed) return;
 
@@ -1855,13 +1852,14 @@ static void cdc_status_push_ex(bool force) {
     if (ctcss_frac >= 10) { ctcss_int++; ctcss_frac = 0; }
 
     snprintf(status_buf, sizeof(status_buf),
-             "!S mode=%u tune=%u tx=%u src=%u pwr=%d ppm=%s%lu.%04lu freq=%s fm_dev=%lu ctcss=%lu.%lu resampling=%s\r\n",
+             "!S mode=%u tune=%u tx=%u src=%u pwr=%d ppm=%s%lu.%04lu freq=%s fm_dev=%lu ctcss=%lu.%lu resampling=%s eq=%u bp=%u comp=%u\r\n",
              cur_mode, cur_tune, cur_tx, cur_src, cur_pwr,
              ppm_neg ? "-" : "", (unsigned long)ppm_int, (unsigned long)ppm_frac,
              freq_str,
              (unsigned long)fm_dev_int,
              (unsigned long)ctcss_int, (unsigned long)ctcss_frac,
-             g_resampling_mode == RESAMPLING_MODE_ADAPTIVE ? "adaptive" : "fixed");
+             g_resampling_mode == RESAMPLING_MODE_ADAPTIVE ? "adaptive" : "fixed",
+             g_cfg.enable_eq, g_cfg.enable_bandpass, g_cfg.enable_comp);
     cdc_write_str(status_buf);
 
     last_mode = cur_mode;
@@ -1873,6 +1871,13 @@ static void cdc_status_push_ex(bool force) {
     last_freq = cur_freq;
     last_fm_dev = cur_fm_dev;
     last_ctcss  = cur_ctcss;
+
+    last_resampling_mode = cur_resampling_mode;
+    
+    last_enable_eq = cur_enable_eq;
+    last_enable_bandpass = cur_enable_bandpass;
+    last_enable_comp = cur_enable_comp;
+
     last_push_ms = to_ms_since_boot(get_absolute_time());
 }
 
