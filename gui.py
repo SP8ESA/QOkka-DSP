@@ -476,9 +476,10 @@ class SX1280ControlApp(ttk.Frame):
         freq_slider_frame.grid(row=1, column=1, sticky="ew", padx=5)
         freq_slider_frame.columnconfigure(0, weight=1)
 
+        min_freq, max_freq = self._get_freq_scale_min_max(self.full_band_var.get())
         self.freq_scale = ttk.Scale(freq_slider_frame,
-                                     from_=self.FREQ_MIN_HZ / 1_000_000,
-                                     to=self.FREQ_MAX_HZ / 1_000_000,
+                                     from_=min_freq / 1_000_000,
+                                     to=max_freq / 1_000_000,
                                      orient=tk.HORIZONTAL,
                                      variable=self.freq_mhz_var,
                                      command=self._on_freq_slider)
@@ -794,14 +795,16 @@ class SX1280ControlApp(ttk.Frame):
         freq = "0" if val == "Off" else val
         self._send_cmd_safe(f"set ctcss {freq}")
 
+    def _get_freq_scale_min_max(self, full):
+        if full:
+            return self.FREQ_MIN_HZ, self.FREQ_MAX_HZ
+        else:
+            return self.QO100_MIN_HZ, self.QO100_MAX_HZ
+
     def _on_full_band_toggle(self):
         full = self.full_band_var.get()
-        if full:
-            lo = self.FREQ_MIN_HZ
-            hi = self.FREQ_MAX_HZ
-        else:
-            lo = self.QO100_MIN_HZ
-            hi = self.QO100_MAX_HZ
+        lo, hi = self._get_freq_scale_min_max(full)
+
         self.freq_scale.configure(from_=lo / 1_000_000, to=hi / 1_000_000)
         # Clamp current frequency into new range
         try:
@@ -1034,6 +1037,19 @@ class SX1280ControlApp(ttk.Frame):
 
                 if self.resampling_var.get() != new_resampling:
                     self.resampling_var.set(new_resampling)
+
+            if "bp" in kv:
+                new_bp = int(kv["bp"])
+                if self.en_bp_var.get() != new_bp:
+                    self.en_bp_var.set(new_bp)
+            if "eq" in kv:
+                new_eq = int(kv["eq"])
+                if self.en_eq_var.get() != new_eq:
+                    self.en_eq_var.set(new_eq)
+            if "comp" in kv:
+                new_comp = int(kv["comp"])
+                if self.en_comp_var.get() != new_comp:
+                    self.en_comp_var.set(new_comp)                                        
 
             if "freq" in kv:
                 new_freq = float(kv["freq"])
