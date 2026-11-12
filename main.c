@@ -575,11 +575,11 @@ static void mic_timer_stop(void) {
 static void usb_audio_pump(void);
 
 typedef enum {
-    AUDIO_MODULATION_SSB = 0,
-    AUDIO_MODULATION_DIGITAL
-} audio_modulation_t;
+    RESAMPLING_MODE_ADAPTIVE = 0,
+    RESAMPLING_MODE_FIXED
+} resampling_mode_t;
 
-static volatile audio_modulation_t g_audio_modulation = AUDIO_MODULATION_SSB;
+static volatile resampling_mode_t g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
 
 static int16_t interpolate_stereo_to_mono(const uint32_t phase_q16, 
                                         const stereo16_t s0, 
@@ -662,7 +662,7 @@ static uint32_t calculate_resampling_step(const uint32_t base_step_q16,
     return *smooth_step_q16;
 }
 
-static int16_t usb_audio_get_mono_8k_int(const audio_modulation_t modulation) {
+static int16_t usb_audio_get_mono_8k_int(const resampling_mode_t resampling_mode) {
     static uint32_t src_rate = 48000u;
     static uint32_t base_step_q16 = 0;
     static uint32_t smooth_step_q16 = 0;  // Smoothed step for gradual changes
@@ -685,7 +685,8 @@ static int16_t usb_audio_get_mono_8k_int(const audio_modulation_t modulation) {
 
     uint32_t step_q16;
     
-    if (modulation == AUDIO_MODULATION_DIGITAL) {
+    if (resampling_mode == RESAMPLING_MODE_FIXED) {
+        //fixed resampling for digital modes such as FT8/FT4
         step_q16 = base_step_q16;
         smooth_step_q16 = base_step_q16;
     } else {
@@ -710,7 +711,7 @@ static int16_t usb_audio_get_mono_8k_int(const audio_modulation_t modulation) {
 // Resampler: host SR stereo -> 8 kHz mono
 // With smoothed adaptive rate to prevent buffer overflow and pitch artifacts
 static int16_t usb_audio_get_mono_8k(void) {
-    return usb_audio_get_mono_8k_int(g_audio_modulation);
+    return usb_audio_get_mono_8k_int(g_resampling_mode);
 }
 
 // ==========================================================
@@ -1708,8 +1709,8 @@ static void cfg_print(void) {
         corr_str, (unsigned long)get_base_steps(), fine);
     cdc_printf(
         "  audio_mode=%s resampler=%s\r\n",
-        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB",
-        g_audio_modulation == AUDIO_MODULATION_DIGITAL ? "FIXED" : "ADAPTIVE"
+        g_resampling_mode == RESAMPLING_MODE_FIXED ? "DIGITAL" : "SSB",
+        g_resampling_mode == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE"
     );        
     cdc_printf(
         "  enable bp=%u eq=%u comp=%u\r\n"
@@ -1751,7 +1752,7 @@ static void cmd_help(void) {
         "  ppm <value>   - set PPM correction (e.g. ppm -0.5)\r\n"
         "  txpwr <-18..13> - set max TX power in dBm\r\n"
         "  enable <bp|eq|comp> <0|1|on|off>\r\n"
-        "  audio_mode ssb|digital - USB audio resampling mode\r\n"
+        "  resampling adaptive|fixed - USB audio resampling mode\r\n"
         "  set bp_lo <Hz>\r\n"
         "  set bp_hi <Hz>\r\n"
         "  set bp_stages <1-10>  (filter steepness: 12dB/oct per stage)\r\n"
@@ -2006,28 +2007,28 @@ static void cdc_handle_line(char *line) {
         return;
     }
 
-    //audio_mode command: SSB|DIGITAL
-    // audio_mode ssb|digital
-    if (streqi(argv[0], "audio_mode")) {
+    //resampling command: ADAPTIVE|FIXED
+    // resampling adaptive|fixed
+    if (streqi(argv[0], "resampling")) {
         
         if (argc == 1) {
-            cdc_printf("audio_mode=%s\r\n", g_audio_modulation  == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB");
+            cdc_printf("resampling=%s\r\n", g_resampling_mode  == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE");
             return;
         }
         if (argc !=2) {
-            cdc_write_str("ERR: audio_mode |ssb|digital\r\n"); 
+            cdc_write_str("ERR: resampling adaptive|fixed\r\n"); 
             return; 
         }
-        if (streqi(argv[1], "ssb")) {
-            g_audio_modulation = AUDIO_MODULATION_SSB;
-        } else if(streqi(argv[1], "digital")) {
-            g_audio_modulation = AUDIO_MODULATION_DIGITAL;
+        if (streqi(argv[1], "adaptive")) {
+            g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
+        } else if(streqi(argv[1], "fixed")) {
+            g_resampling_mode = RESAMPLING_MODE_FIXED;
         } else {
-            cdc_write_str("ERR: audio_mode ssb|digital\r\n"); 
+            cdc_write_str("ERR: resampling adaptive|fixed\r\n"); 
             return;           
         }
         
-        cdc_printf("OK audio_mode=%s\r\n", g_audio_modulation  == AUDIO_MODULATION_DIGITAL ? "DIGITAL" : "SSB");
+        cdc_printf("OK resampling=%s\r\n", g_resampling_mode  == RESAMPLING_MODE_FIXED ? "FIXED" : "ADAPTIVE");
         return;
     }
 
