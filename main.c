@@ -146,6 +146,12 @@ static const uint32_t SX_SPI_BAUD = 18000000;
 
 #define RAMP_TIME           0xE0     // 20 us
 
+typedef enum {
+    RESAMPLING_MODE_ADAPTIVE = 0,
+    RESAMPLING_MODE_FIXED
+} resampling_mode_t;
+
+
 // --- Runtime RF config (adjustable via CDC) ---
 // Frequency stored as double for sub-Hz precision; automatically split into PLL steps + fine DSP offset
 static volatile double g_target_freq_hz = (double)BASE_FREQ_HZ;
@@ -157,7 +163,7 @@ static volatile uint8_t g_tx_mode = 0;     // 0 = USB (SSB), 1 = CW, 2 = FM
 static volatile uint8_t g_tune_active = 0; // 1 = TUNE carrier active
 static volatile uint8_t g_ptt_key = 0;     // 1 = PTT/KEY pressed (live)
 static volatile uint8_t g_audio_src = 0;   // 0 = PC (USB audio), 1 = MIC (ADC0)
-
+static volatile resampling_mode_t g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
 // Guard window after any mode change — suppresses TX output on both
 // cores while the carrier state machine settles and Core1 resumes
 // cleanly.  Prevents clicks when the user scrolls the mode menu.
@@ -269,7 +275,7 @@ static const float PLL_STEP_HZ =
 // take offsets relative to flash start, and reading goes through XIP.
 #define CFG_FLASH_OFFSET   (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
 #define CFG_MAGIC          0x53523132u    // 'SR12' (LE)
-#define CFG_VERSION        1u
+#define CFG_VERSION        2u
 
 typedef struct __attribute__((packed)) {
     uint32_t magic;
@@ -285,6 +291,7 @@ typedef struct __attribute__((packed)) {
     uint8_t  _reserved0;       // was: freedv_mode
     uint8_t  roger_beep;       // 0=off 1=on (FM only)
     uint8_t  _reserved[2];
+    uint8_t resampling;
     uint32_t crc32;            // CRC32 over everything above
 } persist_cfg_t;
 
@@ -324,6 +331,7 @@ static void persist_collect(persist_cfg_t *c) {
     c->fm_deviation_hz = g_fm_deviation_hz;
     c->ctcss_freq      = g_ctcss_freq;
     c->roger_beep      = g_roger_beep;
+    c->resampling      = g_resampling_mode;
     c->crc32           = persist_cfg_crc(c);
 }
 
@@ -362,6 +370,8 @@ static void persist_apply(const persist_cfg_t *c) {
     g_ctcss_freq = ct;
 
     g_roger_beep = (c->roger_beep != 0) ? 1 : 0;
+
+    g_resampling_mode = (c->resampling == 0) ? RESAMPLING_MODE_ADAPTIVE : RESAMPLING_MODE_FIXED;
 }
 
 static bool persist_load(void) {
@@ -574,12 +584,7 @@ static void mic_timer_stop(void) {
 // Read host audio (PCM16LE stereo), push to ringbuffer
 static void usb_audio_pump(void);
 
-typedef enum {
-    RESAMPLING_MODE_ADAPTIVE = 0,
-    RESAMPLING_MODE_FIXED
-} resampling_mode_t;
-
-static volatile resampling_mode_t g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
+//static volatile resampling_mode_t g_resampling_mode = RESAMPLING_MODE_ADAPTIVE;
 
 static int16_t interpolate_stereo_to_mono(const uint32_t phase_q16, 
                                         const stereo16_t s0, 
@@ -1741,6 +1746,7 @@ static void cmd_help(void) {
         "  help\r\n"
         "  get\r\n"
         "  diag          - show SX1280 status\r\n"
+        "  saveconfig    - save current settings to flash\r\n"
         "  tx 0|1        - enable/disable TX (SSB modulation)\r\n"
         "  mode usb|cw|fm - set modulation mode\r\n"
         "  src pc|mic    - audio source (PC=USB audio, MIC=ADC0)\r\n"
@@ -2032,6 +2038,13 @@ static void cdc_handle_line(char *line) {
         return;
     }
 
+    //saveconfig: Persist configuration
+    // saveconfig
+    if (streqi(argv[0], "saveconfig")) {
+        persist_save_now();
+        cdc_printf("DONE saveconfig");
+        return;
+    }
 
     audio_cfg_t c;
     __compiler_memory_barrier();
